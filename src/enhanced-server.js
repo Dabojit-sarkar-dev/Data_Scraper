@@ -248,6 +248,32 @@ async function scrapeCompanyFromWikipedia(companyName) {
     return companyData;
 }
 
+// Helper to make HTML requests (for scraping)
+async function makeHtmlRequest(apiUrl) {
+    return new Promise((resolve, reject) => {
+        const client = apiUrl.startsWith('https') ? https : http;
+        client.get(apiUrl, {headers: {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}}, (res) => {
+            let data = '';
+            if (res.statusCode !== 200) {
+                console.error(`HTML request failed with status: ${res.statusCode} for ${apiUrl}`);
+                // Consume response data to free up memory
+                res.resume();
+                resolve(null);
+                return;
+            }
+            res.on('data', (chunk) => {
+                data += chunk;
+            });
+            res.on('end', () => {
+                resolve(data); // Return raw HTML content
+            });
+        }).on('error', (err) => {
+            console.error(`Error making HTML request to ${apiUrl}:`, err.message);
+            resolve(null);
+        });
+    });
+}
+
 // CompaniesMarketCap Scraper for real-time financial data
 async function scrapeCompanyFromMarketCap(companyName) {
     try {
@@ -268,26 +294,46 @@ async function scrapeCompanyFromMarketCap(companyName) {
         // Try the direct company page
         const companyUrl = `https://companiesmarketcap.com/${searchName}/marketcap/`;
         
-        // Use a simple HTTP request to get the page content
-        const response = await makeApiRequest(companyUrl);
+        // Use HTML request to get the page content
+        const htmlContent = await makeHtmlRequest(companyUrl);
         
-        if (!response) {
+        if (!htmlContent) {
             console.warn(`Could not fetch data from CompaniesMarketCap for ${companyName}`);
             return null;
         }
 
-        // For a more robust solution, we'd parse HTML here
-        // Since we can't use cheerio in this context, we'll implement a basic text extraction
-        const htmlContent = JSON.stringify(response);
+        console.log(`DEBUG: HTML snippet for ${companyName}:`, htmlContent.substring(0, 500));
+
+        // Enhanced regex patterns to extract data from HTML content
+        const marketCapPatterns = [
+            /Market\s*Cap[^$]*\$([0-9,.]+)\s*([BTM])/i,
+            /market\s*capitalization[^$]*\$([0-9,.]+)\s*([BTM])/i,
+            /cap[^$]*\$([0-9,.]+)\s*([BTM])/i
+        ];
         
-        // Extract market cap using regex patterns (simplified approach)
-        const marketCapMatch = htmlContent.match(/Market Cap[^$]*\$([0-9.]+)\s*([BTM])/i);
-        const priceMatch = htmlContent.match(/Price[^$]*\$([0-9.]+)/i);
-        const stockSymbolMatch = htmlContent.match(/\(([A-Z]{1,5})\)/);
+        const pricePatterns = [
+            /Price[^$]*\$([0-9,.]+)/i,
+            /share\s*price[^$]*\$([0-9,.]+)/i,
+            /stock\s*price[^$]*\$([0-9,.]+)/i
+        ];
+        
+        const stockSymbolPatterns = [
+            /\(([A-Z]{2,5})\)/g,
+            /ticker[^:]*:?\s*([A-Z]{2,5})/i,
+            /symbol[^:]*:?\s*([A-Z]{2,5})/i
+        ];
         
         let marketCap = null;
+        let marketCapMatch = null;
+        
+        // Try different market cap patterns
+        for (const pattern of marketCapPatterns) {
+            marketCapMatch = htmlContent.match(pattern);
+            if (marketCapMatch) break;
+        }
+        
         if (marketCapMatch) {
-            const value = parseFloat(marketCapMatch[1]);
+            const value = parseFloat(marketCapMatch[1].replace(/,/g, ''));
             const unit = marketCapMatch[2].toUpperCase();
             
             switch (unit) {
@@ -303,10 +349,36 @@ async function scrapeCompanyFromMarketCap(companyName) {
                 default:
                     marketCap = value;
             }
+            console.log(`DEBUG: Found market cap for ${companyName}: ${value}${unit} = ${marketCap}`);
+        } else {
+            console.log(`DEBUG: No market cap found for ${companyName}`);
         }
 
-        const stockPrice = priceMatch ? parseFloat(priceMatch[1]) : null;
-        const stockSymbol = stockSymbolMatch ? stockSymbolMatch[1] : null;
+        let stockPrice = null;
+        let priceMatch = null;
+        
+        // Try different price patterns
+        for (const pattern of pricePatterns) {
+            priceMatch = htmlContent.match(pattern);
+            if (priceMatch) break;
+        }
+        
+        if (priceMatch) {
+            stockPrice = parseFloat(priceMatch[1].replace(/,/g, ''));
+            console.log(`DEBUG: Found stock price for ${companyName}: ${stockPrice}`);
+        }
+
+        let stockSymbol = null;
+        
+        // Try different stock symbol patterns
+        for (const pattern of stockSymbolPatterns) {
+            const symbolMatch = htmlContent.match(pattern);
+            if (symbolMatch) {
+                stockSymbol = symbolMatch[1];
+                console.log(`DEBUG: Found stock symbol for ${companyName}: ${stockSymbol}`);
+                break;
+            }
+        }
 
         if (marketCap || stockPrice || stockSymbol) {
             console.log(`✓ Successfully obtained real-time data from CompaniesMarketCap for ${companyName}`);
@@ -321,6 +393,7 @@ async function scrapeCompanyFromMarketCap(companyName) {
             };
         }
 
+        console.log(`DEBUG: No useful data extracted for ${companyName} from CompaniesMarketCap`);
         return null;
     } catch (error) {
         console.warn(`Error scraping CompaniesMarketCap for ${companyName}: ${error.message}`);
@@ -591,7 +664,8 @@ Provide realistic estimates based on publicly available information and industry
 async function findOrCreateCompany(companyName) {
     const normalizedName = companyName.toLowerCase();
 
-    if (db.companies[normalizedName] && db.companies[normalizedName].financials.peRatio !== null) { // Check if already fetched comprehensively
+    if (db.companies[normalizedName] && db.companies[normalizedName].financials.peRatio !== null && 
+    db.companies[normalizedName].dataSource === 'companiesmarketcap') { // Only use cache for CompaniesMarketCap data
         console.log(`Using cached data for: ${companyName}`);
         return db.companies[normalizedName];
     }
@@ -611,13 +685,38 @@ async function findOrCreateCompany(companyName) {
 
     let dataSource = 'fallback'; // Track which source provided the data
 
-    // PRIMARY: Try Gemini AI first (most comprehensive)
+    // PRIMARY: Try CompaniesMarketCap first (real-time market data)
+    console.log(`Attempting to fetch data from CompaniesMarketCap for ${companyName}...`);
+    const marketCapData = await scrapeCompanyFromMarketCap(companyData.name || companyName);
+    if (marketCapData) {
+        console.log(`✓ Successfully obtained data from CompaniesMarketCap for ${companyName}`);
+        dataSource = 'companiesmarketcap';
+        
+        companyData = {
+            ...companyData,
+            financials: {
+                ...companyData.financials,
+                stockSymbol: companyData.financials.stockSymbol || marketCapData.financials.stockSymbol,
+                marketCap: companyData.financials.marketCap || marketCapData.financials.marketCap,
+                stockPrice: companyData.financials.stockPrice || marketCapData.financials.stockPrice
+            }
+        };
+        
+        // If CompaniesMarketCap provided comprehensive data, we can skip other sources for basic financial data
+        if (companyData.financials.marketCap && companyData.financials.stockSymbol) {
+            console.log(`✓ CompaniesMarketCap provided comprehensive financial data for ${companyName}`);
+        }
+    } else {
+        console.log(`✗ CompaniesMarketCap failed for ${companyName}, falling back to other sources...`);
+    }
+
+    // FALLBACK 1: Try Gemini AI second (most comprehensive business data)
     if (USE_GEMINI) {
         console.log(`Attempting to fetch data from Gemini AI for ${companyName}...`);
         const geminiData = await fetchDataFromGemini(companyName);
         if (geminiData) {
             console.log(`✓ Successfully obtained data from Gemini for ${companyName}`);
-            dataSource = 'gemini';
+            if (dataSource === 'fallback') dataSource = 'gemini';
             
             // Map Gemini data to company structure
             companyData = {
@@ -633,21 +732,21 @@ async function findOrCreateCompany(companyName) {
                 competitors: geminiData.competitors || [],
                 recentNews: geminiData.recentNews || '',
                 marketPosition: geminiData.marketPosition || '',
-                dataSource: 'gemini'
+                dataSource: dataSource
             };
 
-            // Update financial data if provided by Gemini
+            // Update financial data if provided by Gemini (but don't override CompaniesMarketCap data)
             if (geminiData.financials) {
                 const convertBillionsToFull = (value) => value !== null && value !== undefined ? value * 1000000000 : null;
                 
                 companyData.financials = {
                     ...companyData.financials,
-                    stockSymbol: geminiData.financials.stockSymbol || companyData.financials.stockSymbol,
-                    marketCap: geminiData.financials.marketCap ? convertBillionsToFull(geminiData.financials.marketCap) : companyData.financials.marketCap,
-                    revenue: geminiData.financials.revenue ? convertBillionsToFull(geminiData.financials.revenue) : companyData.financials.revenue,
-                    profitMargin: geminiData.financials.profitMargin || companyData.financials.profitMargin,
-                    peRatio: geminiData.financials.peRatio || companyData.financials.peRatio,
-                    eps: geminiData.financials.eps || companyData.financials.eps
+                    stockSymbol: companyData.financials.stockSymbol || geminiData.financials.stockSymbol,
+                    marketCap: companyData.financials.marketCap || (geminiData.financials.marketCap ? convertBillionsToFull(geminiData.financials.marketCap) : null),
+                    revenue: companyData.financials.revenue || (geminiData.financials.revenue ? convertBillionsToFull(geminiData.financials.revenue) : null),
+                    profitMargin: companyData.financials.profitMargin || geminiData.financials.profitMargin,
+                    peRatio: companyData.financials.peRatio || geminiData.financials.peRatio,
+                    eps: companyData.financials.eps || geminiData.financials.eps
                 };
             }
 
@@ -672,86 +771,20 @@ async function findOrCreateCompany(companyName) {
                     rating: product.rating || null
                 }));
             }
-
-            // If Gemini provided comprehensive data, we can skip other sources
-            if (companyData.description && companyData.financials.stockSymbol) {
-                console.log(`✓ Gemini provided comprehensive data for ${companyName}, skipping other sources`);
-                db.companies[normalizedName] = companyData;
-                return companyData;
-            }
         } else {
             console.log(`✗ Gemini API failed for ${companyName}, falling back to other sources...`);
         }
     }
 
-    // FALLBACK 1: Try to get official name and stock symbol from Alpha Vantage Search
-    const potentialSymbol = await searchStockSymbol(companyName);
-    let symbolToUse = potentialSymbol;
-
-    if (db.companies[normalizedName] && db.companies[normalizedName].financials.stockSymbol) {
-        symbolToUse = db.companies[normalizedName].financials.stockSymbol; // Use pre-cached symbol if available
-    }
-
-    // FALLBACK 2: Fetch Financials and Overview from Alpha Vantage using the symbol
-    if (symbolToUse) {
-        const avData = await fetchCompanyFinancialsFromAlphaVantage(symbolToUse);
-        if (avData) {
-            companyData = {
-                ...companyData,
-                name: avData.name || companyData.name,
-                description: companyData.description || avData.description, // Prioritize Gemini description if available
-                industry: companyData.industry || avData.industry, // Prioritize Gemini industry if available
-                website: companyData.website || avData.website, // Prioritize Gemini website if available
-                financials: {
-                    ...companyData.financials,
-                    stockSymbol: avData.stockSymbol || symbolToUse,
-                    marketCap: companyData.financials.marketCap || avData.marketCap, // Use Gemini data if available
-                    peRatio: companyData.financials.peRatio || avData.peRatio,
-                    eps: companyData.financials.eps || avData.eps,
-                    profitMargin: companyData.financials.profitMargin || avData.profitMargin
-                    // Revenue often requires a different Alpha Vantage endpoint (INCOME_STATEMENT)
-                },
-            };
-            if (dataSource === 'fallback') dataSource = 'alphavantage';
-        }
-    }
-
-    // FALLBACK 2.5: Try CompaniesMarketCap for real-time market cap data
-    const marketCapData = await scrapeCompanyFromMarketCap(companyData.name || companyName);
-    if (marketCapData) {
-        companyData = {
-            ...companyData,
-            financials: {
-                ...companyData.financials,
-                stockSymbol: companyData.financials.stockSymbol || marketCapData.financials.stockSymbol,
-                marketCap: companyData.financials.marketCap || marketCapData.financials.marketCap,
-                stockPrice: companyData.financials.stockPrice || marketCapData.financials.stockPrice
-            }
-        };
-        if (dataSource === 'fallback') dataSource = 'companiesmarketcap';
-    }
-    
-    // FALLBACK 3: Supplement with Wikipedia data (description, logo)
-    // Use the name Alpha Vantage returned if available, otherwise the original input
-    const nameForWikipedia = companyData.name || companyName;
-    const wikiData = await scrapeCompanyFromWikipedia(nameForWikipedia);
-    companyData = {
-        ...companyData,
-        description: companyData.description || wikiData.description, // Prioritize AI descriptions
-        logo: companyData.logo || wikiData.logo, 
-        website: companyData.website || wikiData.website, // Prioritize AI/AV website
-        name: wikiData.officialName || companyData.name // Update name if Wikipedia has a more official one
-    };
-    if (dataSource === 'fallback') dataSource = 'wikipedia';
-    
-    // FALLBACK 4: Enhance with Mistral AI data if Gemini failed and Mistral is available
-    if (dataSource !== 'gemini' && USE_MISTRAL) {
+    // FALLBACK 2: Try Mistral AI third (enhanced business intelligence)
+    if (USE_MISTRAL && dataSource !== 'gemini') {
         console.log(`Attempting to enhance data with Mistral AI for ${companyName}...`);
         const mistralData = await fetchDataFromMistral(companyData.name);
         if (mistralData) {
             console.log(`✓ Enhanced data with Mistral for ${companyName}`);
+            if (dataSource === 'fallback') dataSource = 'mistral';
             
-            // Update company info (but don't override Gemini data)
+            // Update company info (but don't override higher priority data)
             companyData = {
                 ...companyData,
                 description: companyData.description || mistralData.description,
@@ -763,8 +796,8 @@ async function findOrCreateCompany(companyName) {
                 headquarters: companyData.headquarters || mistralData.headquarters
             };
             
-            // Update customer metrics if provided by Mistral (only if not from Gemini)
-            if (mistralData.customerMetrics && dataSource !== 'gemini') {
+            // Update customer metrics if provided by Mistral (only if not from higher priority sources)
+            if (mistralData.customerMetrics && dataSource !== 'gemini' && dataSource !== 'companiesmarketcap') {
                 const convertMillionsToFull = (value) => value !== null ? value * 1000000 : null;
                 
                 companyData.customerMetrics = {
@@ -778,11 +811,12 @@ async function findOrCreateCompany(companyName) {
             }
             
             // Update financial data if missing from other sources
-            if (mistralData.financials && dataSource !== 'gemini') {
+            if (mistralData.financials && dataSource !== 'gemini' && dataSource !== 'companiesmarketcap') {
                 const convertBillionsToFull = (value) => value !== null ? value * 1000000000 : null;
                 
                 companyData.financials = {
                     ...companyData.financials,
+                    stockSymbol: companyData.financials.stockSymbol || mistralData.financials.stockSymbol,
                     marketCap: companyData.financials.marketCap || 
                               (mistralData.financials.marketCap ? convertBillionsToFull(mistralData.financials.marketCap) : null),
                     revenue: companyData.financials.revenue || 
@@ -792,12 +826,55 @@ async function findOrCreateCompany(companyName) {
                     eps: companyData.financials.eps || mistralData.financials.eps
                 };
             }
-            
-            if (dataSource === 'fallback') dataSource = 'mistral';
         }
     }
 
-    // If financials are still sparse, and we have a symbol, make a last attempt with old Yahoo Finance scraper as a fallback
+    // FALLBACK 3: Try to get official name and stock symbol from Alpha Vantage Search
+    const potentialSymbol = await searchStockSymbol(companyName);
+    let symbolToUse = potentialSymbol;
+
+    if (db.companies[normalizedName] && db.companies[normalizedName].financials.stockSymbol) {
+        symbolToUse = db.companies[normalizedName].financials.stockSymbol; // Use pre-cached symbol if available
+    }
+
+    // FALLBACK 4: Fetch Financials and Overview from Alpha Vantage using the symbol
+    if (symbolToUse) {
+        const avData = await fetchCompanyFinancialsFromAlphaVantage(symbolToUse);
+        if (avData) {
+            companyData = {
+                ...companyData,
+                name: avData.name || companyData.name,
+                description: companyData.description || avData.description, // Prioritize higher sources
+                industry: companyData.industry || avData.industry, // Prioritize higher sources
+                website: companyData.website || avData.website, // Prioritize higher sources
+                financials: {
+                    ...companyData.financials,
+                    stockSymbol: companyData.financials.stockSymbol || avData.stockSymbol || symbolToUse,
+                    marketCap: companyData.financials.marketCap || avData.marketCap, // Use higher priority data if available
+                    peRatio: companyData.financials.peRatio || avData.peRatio,
+                    eps: companyData.financials.eps || avData.eps,
+                    profitMargin: companyData.financials.profitMargin || avData.profitMargin
+                    // Revenue often requires a different Alpha Vantage endpoint (INCOME_STATEMENT)
+                },
+            };
+            if (dataSource === 'fallback') dataSource = 'alphavantage';
+        }
+    }
+    
+    // FALLBACK 5: Supplement with Wikipedia data (description, logo)
+    // Use the name Alpha Vantage returned if available, otherwise the original input
+    const nameForWikipedia = companyData.name || companyName;
+    const wikiData = await scrapeCompanyFromWikipedia(nameForWikipedia);
+    companyData = {
+        ...companyData,
+        description: companyData.description || wikiData.description, // Prioritize higher priority sources
+        logo: companyData.logo || wikiData.logo, 
+        website: companyData.website || wikiData.website, // Prioritize higher priority sources
+        name: wikiData.officialName || companyData.name // Update name if Wikipedia has a more official one
+    };
+    if (dataSource === 'fallback') dataSource = 'wikipedia';
+
+    // FALLBACK 6: If financials are still sparse, and we have a symbol, make a last attempt with old Yahoo Finance scraper as a fallback
     // This is NOT recommended due to rate limits but included for minimal viability if AV fails.
     if (!companyData.financials.marketCap && companyData.financials.stockSymbol && ALPHA_VANTAGE_API_KEY === 'YOUR_API_KEY_HERE') {
         console.warn("Alpha Vantage key not set, trying Yahoo Finance as fallback for financial details. This may be unreliable.")
@@ -1533,7 +1610,7 @@ let server = http.createServer(async (req, res) => {
                     mistral: USE_MISTRAL && MISTRAL_API_KEY !== 'YOUR_MISTRAL_API_KEY',
                     alphaVantage: ALPHA_VANTAGE_API_KEY !== 'YOUR_API_KEY_HERE'
                 },
-                dataSourcePriority: ['Gemini AI', 'Mistral AI', 'Alpha Vantage', 'CompaniesMarketCap (Real-time)', 'Wikipedia', 'Yahoo Finance (fallback)']
+                dataSourcePriority: ['CompaniesMarketCap (Real-time)', 'Gemini AI', 'Mistral AI', 'Alpha Vantage', 'Wikipedia', 'Yahoo Finance (fallback)']
             };
             
             res.writeHead(200, {'Content-Type': 'application/json'});

@@ -48,8 +48,8 @@ and real-time financial accuracy.
 
 ```bash
 # Clone repository
-git clone <repository-url>
-cd competitor-analysis-scraper
+git clone https://github.com/Dabojit-sarkar-dev/Competitor-Analysis-Scraper.git
+cd Competitor-Analysis-Scraper
 
 # Run with Node.js
 node src/enhanced-server.js
