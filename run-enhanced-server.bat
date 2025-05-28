@@ -12,8 +12,9 @@ set SERVER_SCRIPT=%~dp0src\enhanced-server.js
 REM Set environment variables (uncomment and modify as needed)
 set PORT=9000
 REM set HOST=0.0.0.0
-REM set ALPHA_VANTAGE_API_KEY=your_api_key_here
+set GEMINI_API_KEY=AIzaSyBkpg5F3G72SuZZ24zCXv-8p_0WOpR4cdI
 REM set MISTRAL_API_KEY=your_mistral_key_here
+REM set ALPHA_VANTAGE_API_KEY=your_api_key_here
 
 echo Using Node.js from: %PLAYWRIGHT_NODE_EXE%
 echo.

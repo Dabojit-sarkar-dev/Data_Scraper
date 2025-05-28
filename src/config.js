@@ -12,16 +12,21 @@ module.exports = {
     }
   },
   
-  // API keys
+  // API keys - ordered by priority
   api: {
-    alphaVantage: {
-      key: process.env.ALPHA_VANTAGE_API_KEY || '1HJN43LFAM74ZOVM',
-      baseUrl: 'https://www.alphavantage.co/query'
+    gemini: {
+      key: process.env.GEMINI_API_KEY || 'AIzaSyBkpg5F3G72SuZZ24zCXv-8p_0WOpR4cdI',
+      enabled: true,
+      baseUrl: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent'
     },
     mistral: {
       key: process.env.MISTRAL_API_KEY || 'cwDEy5QsNjerFAqe4sj9XIN62IaLyTM9',
       enabled: true,
       baseUrl: 'https://api.mistral.ai/v1/chat/completions'
+    },
+    alphaVantage: {
+      key: process.env.ALPHA_VANTAGE_API_KEY || '1HJN43LFAM74ZOVM',
+      baseUrl: 'https://www.alphavantage.co/query'
     }
   },
   

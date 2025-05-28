@@ -46,6 +46,8 @@ let PORT = config.server.port; // Will be updated if a port is selected from fal
 const ALPHA_VANTAGE_API_KEY = config.api.alphaVantage.key;
 const MISTRAL_API_KEY = config.api.mistral.key;
 const USE_MISTRAL = config.api.mistral.enabled;
+const GEMINI_API_KEY = config.api.gemini.key;
+const USE_GEMINI = config.api.gemini.enabled;
 
 // Helper functions to generate estimated user metrics based on company data
 function generateEstimatedUserCount(companyName) {
@@ -246,6 +248,86 @@ async function scrapeCompanyFromWikipedia(companyName) {
     return companyData;
 }
 
+// CompaniesMarketCap Scraper for real-time financial data
+async function scrapeCompanyFromMarketCap(companyName) {
+    try {
+        console.log(`Fetching real-time financial data for ${companyName} from CompaniesMarketCap...`);
+        
+        // Create a search-friendly version of the company name
+        const searchName = companyName.toLowerCase()
+            .replace(/\s+inc\.?$/i, '')
+            .replace(/\s+corporation\.?$/i, '')
+            .replace(/\s+corp\.?$/i, '')
+            .replace(/\s+ltd\.?$/i, '')
+            .replace(/\s+llc\.?$/i, '')
+            .replace(/\s+company$/i, '')
+            .replace(/\s+co\.?$/i, '')
+            .replace(/[^a-z0-9\s]/g, '')
+            .replace(/\s+/g, '-');
+
+        // Try the direct company page
+        const companyUrl = `https://companiesmarketcap.com/${searchName}/marketcap/`;
+        
+        // Use a simple HTTP request to get the page content
+        const response = await makeApiRequest(companyUrl);
+        
+        if (!response) {
+            console.warn(`Could not fetch data from CompaniesMarketCap for ${companyName}`);
+            return null;
+        }
+
+        // For a more robust solution, we'd parse HTML here
+        // Since we can't use cheerio in this context, we'll implement a basic text extraction
+        const htmlContent = JSON.stringify(response);
+        
+        // Extract market cap using regex patterns (simplified approach)
+        const marketCapMatch = htmlContent.match(/Market Cap[^$]*\$([0-9.]+)\s*([BTM])/i);
+        const priceMatch = htmlContent.match(/Price[^$]*\$([0-9.]+)/i);
+        const stockSymbolMatch = htmlContent.match(/\(([A-Z]{1,5})\)/);
+        
+        let marketCap = null;
+        if (marketCapMatch) {
+            const value = parseFloat(marketCapMatch[1]);
+            const unit = marketCapMatch[2].toUpperCase();
+            
+            switch (unit) {
+                case 'T':
+                    marketCap = value * 1000000000000;
+                    break;
+                case 'B':
+                    marketCap = value * 1000000000;
+                    break;
+                case 'M':
+                    marketCap = value * 1000000;
+                    break;
+                default:
+                    marketCap = value;
+            }
+        }
+
+        const stockPrice = priceMatch ? parseFloat(priceMatch[1]) : null;
+        const stockSymbol = stockSymbolMatch ? stockSymbolMatch[1] : null;
+
+        if (marketCap || stockPrice || stockSymbol) {
+            console.log(`✓ Successfully obtained real-time data from CompaniesMarketCap for ${companyName}`);
+            return {
+                name: companyName,
+                financials: {
+                    stockSymbol: stockSymbol,
+                    marketCap: marketCap,
+                    stockPrice: stockPrice
+                },
+                dataSource: 'companiesmarketcap'
+            };
+        }
+
+        return null;
+    } catch (error) {
+        console.warn(`Error scraping CompaniesMarketCap for ${companyName}: ${error.message}`);
+        return null;
+    }
+}
+
 // Mistral API integration for enhanced data gathering
 async function fetchDataFromMistral(companyName) {
     if (!USE_MISTRAL || MISTRAL_API_KEY === 'YOUR_MISTRAL_API_KEY') {
@@ -396,6 +478,115 @@ Format as JSON with the following structure:
     }
 }
 
+// Gemini API integration for enhanced data gathering (Primary source)
+async function fetchDataFromGemini(companyName) {
+    if (!USE_GEMINI || GEMINI_API_KEY === 'YOUR_GEMINI_API_KEY') {
+        console.log('Gemini API key not set or integration disabled. Skipping Gemini data gathering.');
+        return null;
+    }
+
+    console.log(`Fetching enhanced company data for ${companyName} from Gemini AI...`);
+    console.log(`Using Gemini API for ${companyName}. This may take a few seconds...`);
+    
+    try {
+        const prompt = `Analyze the company "${companyName}" and provide comprehensive business intelligence data in the following JSON format. Use your knowledge to provide accurate estimates and information:
+
+{
+  "description": "Comprehensive 2-3 sentence description of the company's business model and operations",
+  "industry": "Primary industry/sector",
+  "founded": "YYYY",
+  "headquarters": "City, State/Country",
+  "website": "Official website URL if known",
+  "financials": {
+    "stockSymbol": "Stock ticker symbol if publicly traded",
+    "marketCap": number_in_billions,
+    "revenue": number_in_billions_annual,
+    "profitMargin": decimal_percentage,
+    "peRatio": number,
+    "eps": number
+  },
+  "strengths": ["List of 3-5 key competitive advantages"],
+  "weaknesses": ["List of 2-3 main challenges or weaknesses"],
+  "competitors": ["List of 3-5 main competitors"],
+  "customerMetrics": {
+    "userCount": number_in_millions,
+    "userGrowth": decimal_growth_rate,
+    "rating": number_out_of_5
+  },
+  "products": [
+    {"name": "Product name", "category": "Product category"}
+  ],
+  "recentNews": "Brief summary of recent significant developments or news",
+  "marketPosition": "Brief description of market position and competitive standing"
+}
+
+Provide realistic estimates based on publicly available information and industry knowledge. For financial data, use approximate values in billions for market cap and revenue.`;
+
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                contents: [{
+                    parts: [{
+                        text: prompt
+                    }]
+                }],
+                generationConfig: {
+                    temperature: 0.2,
+                    topK: 1,
+                    topP: 1,
+                    maxOutputTokens: 2048
+                }
+            })
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error(`Gemini API error: ${response.status} ${response.statusText}`, errorText);
+            return null;
+        }
+
+        const data = await response.json();
+        
+        if (!data.candidates || !data.candidates[0] || !data.candidates[0].content || !data.candidates[0].content.parts) {
+            console.error('Unexpected Gemini API response format:', data);
+            return null;
+        }
+        
+        const responseText = data.candidates[0].content.parts[0].text;
+        console.log(`Received response from Gemini for ${companyName}`);
+
+        let result;
+        try {
+            // Extract JSON from the response (Gemini might include additional text)
+            const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+                result = JSON.parse(jsonMatch[0]);
+                console.log(`Successfully processed Gemini data for ${companyName}`);
+                
+                // Add source information
+                result._source = 'gemini';
+                result._timestamp = new Date().toISOString();
+                
+                return result;
+            } else {
+                console.warn('No JSON found in Gemini response for', companyName);
+                return null;
+            }
+        } catch (e) {
+            console.error('Failed to parse Gemini response as JSON:', e);
+            console.log('Raw content:', responseText.substring(0, 500) + '...');
+            return null;
+        }
+
+    } catch (error) {
+        console.error('Error fetching data from Gemini:', error);
+        return null;
+    }
+}
+
 // Find or create company data
 async function findOrCreateCompany(companyName) {
     const normalizedName = companyName.toLowerCase();
@@ -418,7 +609,82 @@ async function findOrCreateCompany(companyName) {
         products: [] // Products hard to scrape generically
     };
 
-    // 1. Try to get official name and stock symbol from Alpha Vantage Search
+    let dataSource = 'fallback'; // Track which source provided the data
+
+    // PRIMARY: Try Gemini AI first (most comprehensive)
+    if (USE_GEMINI) {
+        console.log(`Attempting to fetch data from Gemini AI for ${companyName}...`);
+        const geminiData = await fetchDataFromGemini(companyName);
+        if (geminiData) {
+            console.log(`✓ Successfully obtained data from Gemini for ${companyName}`);
+            dataSource = 'gemini';
+            
+            // Map Gemini data to company structure
+            companyData = {
+                ...companyData,
+                name: companyData.name, // Keep original name, but could use gemini name if preferred
+                description: geminiData.description || companyData.description,
+                industry: geminiData.industry || companyData.industry,
+                founded: geminiData.founded ? parseInt(geminiData.founded) : companyData.founded,
+                headquarters: geminiData.headquarters || companyData.headquarters,
+                website: geminiData.website || companyData.website,
+                strengths: geminiData.strengths || [],
+                weaknesses: geminiData.weaknesses || [],
+                competitors: geminiData.competitors || [],
+                recentNews: geminiData.recentNews || '',
+                marketPosition: geminiData.marketPosition || '',
+                dataSource: 'gemini'
+            };
+
+            // Update financial data if provided by Gemini
+            if (geminiData.financials) {
+                const convertBillionsToFull = (value) => value !== null && value !== undefined ? value * 1000000000 : null;
+                
+                companyData.financials = {
+                    ...companyData.financials,
+                    stockSymbol: geminiData.financials.stockSymbol || companyData.financials.stockSymbol,
+                    marketCap: geminiData.financials.marketCap ? convertBillionsToFull(geminiData.financials.marketCap) : companyData.financials.marketCap,
+                    revenue: geminiData.financials.revenue ? convertBillionsToFull(geminiData.financials.revenue) : companyData.financials.revenue,
+                    profitMargin: geminiData.financials.profitMargin || companyData.financials.profitMargin,
+                    peRatio: geminiData.financials.peRatio || companyData.financials.peRatio,
+                    eps: geminiData.financials.eps || companyData.financials.eps
+                };
+            }
+
+            // Update customer metrics if provided by Gemini
+            if (geminiData.customerMetrics) {
+                const convertMillionsToFull = (value) => value !== null && value !== undefined ? value * 1000000 : null;
+                
+                companyData.customerMetrics = {
+                    userCount: geminiData.customerMetrics.userCount ? 
+                              convertMillionsToFull(geminiData.customerMetrics.userCount) : 
+                              companyData.customerMetrics.userCount,
+                    userGrowth: geminiData.customerMetrics.userGrowth || companyData.customerMetrics.userGrowth,
+                    rating: geminiData.customerMetrics.rating || companyData.customerMetrics.rating
+                };
+            }
+
+            // Update products if provided by Gemini
+            if (geminiData.products && Array.isArray(geminiData.products)) {
+                companyData.products = geminiData.products.map(product => ({
+                    name: product.name || product,
+                    category: product.category || '',
+                    rating: product.rating || null
+                }));
+            }
+
+            // If Gemini provided comprehensive data, we can skip other sources
+            if (companyData.description && companyData.financials.stockSymbol) {
+                console.log(`✓ Gemini provided comprehensive data for ${companyName}, skipping other sources`);
+                db.companies[normalizedName] = companyData;
+                return companyData;
+            }
+        } else {
+            console.log(`✗ Gemini API failed for ${companyName}, falling back to other sources...`);
+        }
+    }
+
+    // FALLBACK 1: Try to get official name and stock symbol from Alpha Vantage Search
     const potentialSymbol = await searchStockSymbol(companyName);
     let symbolToUse = potentialSymbol;
 
@@ -426,64 +692,83 @@ async function findOrCreateCompany(companyName) {
         symbolToUse = db.companies[normalizedName].financials.stockSymbol; // Use pre-cached symbol if available
     }
 
-    // 2. Fetch Financials and Overview from Alpha Vantage using the symbol
+    // FALLBACK 2: Fetch Financials and Overview from Alpha Vantage using the symbol
     if (symbolToUse) {
         const avData = await fetchCompanyFinancialsFromAlphaVantage(symbolToUse);
         if (avData) {
             companyData = {
                 ...companyData,
                 name: avData.name || companyData.name,
-                description: avData.description || companyData.description,
-                industry: avData.industry || companyData.industry,
-                website: avData.website || companyData.website,
+                description: companyData.description || avData.description, // Prioritize Gemini description if available
+                industry: companyData.industry || avData.industry, // Prioritize Gemini industry if available
+                website: companyData.website || avData.website, // Prioritize Gemini website if available
                 financials: {
                     ...companyData.financials,
                     stockSymbol: avData.stockSymbol || symbolToUse,
-                    marketCap: avData.marketCap,
-                    peRatio: avData.peRatio,
-                    eps: avData.eps,
-                    profitMargin: avData.profitMargin
+                    marketCap: companyData.financials.marketCap || avData.marketCap, // Use Gemini data if available
+                    peRatio: companyData.financials.peRatio || avData.peRatio,
+                    eps: companyData.financials.eps || avData.eps,
+                    profitMargin: companyData.financials.profitMargin || avData.profitMargin
                     // Revenue often requires a different Alpha Vantage endpoint (INCOME_STATEMENT)
                 },
             };
+            if (dataSource === 'fallback') dataSource = 'alphavantage';
+        }
     }
-  }
 
-    // 3. Supplement with Wikipedia data (description, logo)
+    // FALLBACK 2.5: Try CompaniesMarketCap for real-time market cap data
+    const marketCapData = await scrapeCompanyFromMarketCap(companyData.name || companyName);
+    if (marketCapData) {
+        companyData = {
+            ...companyData,
+            financials: {
+                ...companyData.financials,
+                stockSymbol: companyData.financials.stockSymbol || marketCapData.financials.stockSymbol,
+                marketCap: companyData.financials.marketCap || marketCapData.financials.marketCap,
+                stockPrice: companyData.financials.stockPrice || marketCapData.financials.stockPrice
+            }
+        };
+        if (dataSource === 'fallback') dataSource = 'companiesmarketcap';
+    }
+    
+    // FALLBACK 3: Supplement with Wikipedia data (description, logo)
     // Use the name Alpha Vantage returned if available, otherwise the original input
     const nameForWikipedia = companyData.name || companyName;
     const wikiData = await scrapeCompanyFromWikipedia(nameForWikipedia);
     companyData = {
         ...companyData,
-        description: companyData.description || wikiData.description, // Prioritize AV description
-        logo: companyData.logo || wikiData.logo, // Prioritize AV logo if we had one
-        website: companyData.website || wikiData.website, // Prioritize AV website
+        description: companyData.description || wikiData.description, // Prioritize AI descriptions
+        logo: companyData.logo || wikiData.logo, 
+        website: companyData.website || wikiData.website, // Prioritize AI/AV website
         name: wikiData.officialName || companyData.name // Update name if Wikipedia has a more official one
     };
+    if (dataSource === 'fallback') dataSource = 'wikipedia';
     
-    // 4. Enhance with Mistral AI data if available
-    if (USE_MISTRAL) {
+    // FALLBACK 4: Enhance with Mistral AI data if Gemini failed and Mistral is available
+    if (dataSource !== 'gemini' && USE_MISTRAL) {
+        console.log(`Attempting to enhance data with Mistral AI for ${companyName}...`);
         const mistralData = await fetchDataFromMistral(companyData.name);
         if (mistralData) {
-            // Update company info
+            console.log(`✓ Enhanced data with Mistral for ${companyName}`);
+            
+            // Update company info (but don't override Gemini data)
             companyData = {
                 ...companyData,
-                description: mistralData.description || companyData.description,
+                description: companyData.description || mistralData.description,
                 industry: companyData.industry || mistralData.industry,
-                strengths: mistralData.strengths || [],
-                weaknesses: mistralData.weaknesses || [],
-                competitors: mistralData.competitors || [],
+                strengths: companyData.strengths || mistralData.strengths || [],
+                weaknesses: companyData.weaknesses || mistralData.weaknesses || [],
+                competitors: companyData.competitors || mistralData.competitors || [],
                 founded: companyData.founded || mistralData.founded,
                 headquarters: companyData.headquarters || mistralData.headquarters
             };
             
-            // Update customer metrics if provided by Mistral
-            if (mistralData.customerMetrics) {
+            // Update customer metrics if provided by Mistral (only if not from Gemini)
+            if (mistralData.customerMetrics && dataSource !== 'gemini') {
                 const convertMillionsToFull = (value) => value !== null ? value * 1000000 : null;
                 
                 companyData.customerMetrics = {
                     ...companyData.customerMetrics,
-                    // Only use Mistral data if current data is missing or generated
                     userCount: mistralData.customerMetrics.userCount ? 
                               convertMillionsToFull(mistralData.customerMetrics.userCount) : 
                               companyData.customerMetrics.userCount,
@@ -492,14 +777,12 @@ async function findOrCreateCompany(companyName) {
                 };
             }
             
-            // Update financial data if missing from Alpha Vantage
-            if (mistralData.financials) {
-                // Convert billions to actual values if provided by Mistral
+            // Update financial data if missing from other sources
+            if (mistralData.financials && dataSource !== 'gemini') {
                 const convertBillionsToFull = (value) => value !== null ? value * 1000000000 : null;
                 
                 companyData.financials = {
                     ...companyData.financials,
-                    // Only use Mistral data if Alpha Vantage data is missing
                     marketCap: companyData.financials.marketCap || 
                               (mistralData.financials.marketCap ? convertBillionsToFull(mistralData.financials.marketCap) : null),
                     revenue: companyData.financials.revenue || 
@@ -509,6 +792,8 @@ async function findOrCreateCompany(companyName) {
                     eps: companyData.financials.eps || mistralData.financials.eps
                 };
             }
+            
+            if (dataSource === 'fallback') dataSource = 'mistral';
         }
     }
 
@@ -521,6 +806,7 @@ async function findOrCreateCompany(companyName) {
             companyData.financials.marketCap = companyData.financials.marketCap || yahooData.marketCap;
             companyData.financials.revenue = companyData.financials.revenue || yahooData.revenue; // Yahoo might have this
         }
+        if (dataSource === 'fallback') dataSource = 'yahoo';
     }
 
     if (!companyData.name && !companyData.description) {
@@ -528,7 +814,11 @@ async function findOrCreateCompany(companyName) {
         return null; // Failed to get any meaningful data
     }
 
-    console.log(`Data for ${companyData.name}: Symbol: ${companyData.financials.stockSymbol}, MktCap: ${companyData.financials.marketCap}`);
+    // Add metadata about data source
+    companyData.dataSource = dataSource;
+    companyData.lastUpdated = new Date().toISOString();
+
+    console.log(`✓ Data for ${companyData.name}: Source: ${dataSource}, Symbol: ${companyData.financials.stockSymbol}, MktCap: ${companyData.financials.marketCap}`);
     db.companies[normalizedName] = companyData;
     return companyData;
 }
@@ -1117,10 +1407,18 @@ let server = http.createServer(async (req, res) => {
                   let width1 = 0, width2 = 0;
                   
                   if (value1 !== 'N/A' && value2 !== 'N/A') {
-                    const val1 = parseFloat(value1);
-                    const val2 = parseFloat(value2);
+                    // Parse the numerical values, removing formatting
+                    let val1 = parseFloat(value1.toString().replace(/[^0-9.-]/g, ''));
+                    let val2 = parseFloat(value2.toString().replace(/[^0-9.-]/g, ''));
+                    
+                    // Handle unit conversions for proper scaling
+                    if (value1.toString().includes('T')) val1 *= 1000; // Convert trillions to billions for comparison
+                    if (value2.toString().includes('T')) val2 *= 1000;
+                    if (value1.toString().includes('M') && !value1.toString().includes('Margin')) val1 /= 1000; // Convert millions to billions (except profit margin)
+                    if (value2.toString().includes('M') && !value2.toString().includes('Margin')) val2 /= 1000;
+                    
                     if (!isNaN(val1) && !isNaN(val2)) {
-                      const max = Math.max(Math.abs(val1), Math.abs(val2));
+                      const max = Math.max(Math.abs(val1), Math.abs(val2), 0.1); // Minimum threshold to avoid zero division
                       width1 = Math.abs(val1) / max * 100;
                       width2 = Math.abs(val2) / max * 100;
                     }
@@ -1136,11 +1434,11 @@ let server = http.createServer(async (req, res) => {
                   return '<div class="metric-row">' +
                     '<div class="metric-label">' + label + '</div>' +
                     '<div class="metric-bar-container">' +
-                      '<div class="metric-bar metric-bar-1" style="width: ' + width1 + '%"></div>' +
+                      '<div class="metric-bar metric-bar-1" style="width: ' + width1 + '%; min-width: ' + (width1 > 0 ? '5px' : '0') + ';"></div>' +
                     '</div>' +
                     '<div class="metric-value">' + value1 + '</div>' +
                     '<div class="metric-bar-container">' +
-                      '<div class="metric-bar metric-bar-2" style="width: ' + width2 + '%"></div>' +
+                      '<div class="metric-bar metric-bar-2" style="width: ' + width2 + '%; min-width: ' + (width2 > 0 ? '5px' : '0') + ';"></div>' +
                     '</div>' +
                     '<div class="metric-value">' + value2 + '</div>' +
                     '<div class="metric-winner">' + winner + '</div>' +
@@ -1161,21 +1459,50 @@ let server = http.createServer(async (req, res) => {
                   labels.forEach((label, i) => {
                     const value1 = datasets[0].data[i];
                     const value2 = datasets[1].data[i];
-                    const max = Math.max(value1, value2, 1); // Use at least 1 to avoid division by zero
                     
-                    const width1 = (value1 / max * 100) + '%';
-                    const width2 = (value2 / max * 100) + '%';
+                    // Ensure we have valid numbers
+                    const numValue1 = parseFloat(value1) || 0;
+                    const numValue2 = parseFloat(value2) || 0;
+                    
+                    // Find the maximum value for proper scaling
+                    const max = Math.max(Math.abs(numValue1), Math.abs(numValue2), 1);
+                    
+                    // Calculate widths as percentages
+                    const width1 = Math.abs(numValue1) / max * 100;
+                    const width2 = Math.abs(numValue2) / max * 100;
+                    
+                    // Format display values appropriately
+                    let displayValue1, displayValue2;
+                    
+                    // Special formatting for different metric types
+                    if (label.includes('Market Cap') || label.includes('Revenue')) {
+                      // Already in billions, show with 1 decimal
+                      displayValue1 = numValue1.toFixed(1) + 'B';
+                      displayValue2 = numValue2.toFixed(1) + 'B';
+                    } else if (label.includes('User Count')) {
+                      // Already in millions, show with 0-1 decimals
+                      displayValue1 = numValue1 < 100 ? numValue1.toFixed(1) + 'M' : numValue1.toFixed(0) + 'M';
+                      displayValue2 = numValue2 < 100 ? numValue2.toFixed(1) + 'M' : numValue2.toFixed(0) + 'M';
+                    } else if (label.includes('Growth') || label.includes('Margin')) {
+                      // Percentage values
+                      displayValue1 = numValue1.toFixed(1) + '%';
+                      displayValue2 = numValue2.toFixed(1) + '%';
+                    } else {
+                      // Default formatting for ratios, ratings, etc.
+                      displayValue1 = numValue1.toFixed(1);
+                      displayValue2 = numValue2.toFixed(1);
+                    }
                     
                     html += '<div style="display:flex; margin-bottom:15px; align-items:center;">' +
                       '<div style="width:150px; font-weight:bold;">' + label + '</div>' +
                       '<div style="flex:1; padding:0 10px;">' +
-                        '<div style="background:#4285f4; height:25px; width:' + width1 + '; position:relative;">' +
-                          '<span style="position:absolute; right:5px; top:3px; color:#fff; font-size:12px;">' + value1.toFixed(1) + '</span>' +
+                        '<div style="background:#4285f4; height:25px; width:' + width1 + '%; position:relative; min-width:20px;">' +
+                          '<span style="position:absolute; right:5px; top:3px; color:#fff; font-size:12px; white-space:nowrap;">' + displayValue1 + '</span>' +
                         '</div>' +
                       '</div>' +
                       '<div style="flex:1; padding:0 10px;">' +
-                        '<div style="background:#ea4335; height:25px; width:' + width2 + '; position:relative;">' +
-                          '<span style="position:absolute; right:5px; top:3px; color:#fff; font-size:12px;">' + value2.toFixed(1) + '</span>' +
+                        '<div style="background:#ea4335; height:25px; width:' + width2 + '%; position:relative; min-width:20px;">' +
+                          '<span style="position:absolute; right:5px; top:3px; color:#fff; font-size:12px; white-space:nowrap;">' + displayValue2 + '</span>' +
                         '</div>' +
                       '</div>' +
                     '</div>';
@@ -1202,9 +1529,11 @@ let server = http.createServer(async (req, res) => {
                     heapUsed: Math.round(memoryUsage.heapUsed / 1024 / 1024) + 'MB'
                 },
                 apis: {
-                    alphaVantage: ALPHA_VANTAGE_API_KEY !== 'YOUR_API_KEY_HERE',
-                    mistral: USE_MISTRAL && MISTRAL_API_KEY !== 'YOUR_MISTRAL_API_KEY'
-                }
+                    gemini: USE_GEMINI && GEMINI_API_KEY !== 'YOUR_GEMINI_API_KEY',
+                    mistral: USE_MISTRAL && MISTRAL_API_KEY !== 'YOUR_MISTRAL_API_KEY',
+                    alphaVantage: ALPHA_VANTAGE_API_KEY !== 'YOUR_API_KEY_HERE'
+                },
+                dataSourcePriority: ['Gemini AI', 'Mistral AI', 'Alpha Vantage', 'CompaniesMarketCap (Real-time)', 'Wikipedia', 'Yahoo Finance (fallback)']
             };
             
             res.writeHead(200, {'Content-Type': 'application/json'});
@@ -1386,6 +1715,21 @@ function startServer() {
         console.warn('⚠️  WARNING: Alpha Vantage API key is not set.');
         console.warn('⚠️  Data for new companies will be limited.');
         console.warn('⚠️  Get a free key from https://www.alphavantage.co/support/#api-key');
+      }
+      
+      if (GEMINI_API_KEY === 'YOUR_GEMINI_API_KEY') {
+        console.warn('⚠️  WARNING: Gemini API key is not set.');
+        console.warn('⚠️  Gemini AI (primary data source) will be skipped.');
+        console.warn('⚠️  Get a free key from https://makersuite.google.com/app/apikey');
+      } else {
+        console.log('✓ Gemini AI enabled (primary data source)');
+      }
+      
+      if (MISTRAL_API_KEY === 'YOUR_MISTRAL_API_KEY') {
+        console.warn('⚠️  WARNING: Mistral API key is not set.');
+        console.warn('⚠️  Mistral AI (fallback data source) will be skipped.');
+      } else {
+        console.log('✓ Mistral AI enabled (fallback data source)');
       }
       
       // Create a health check endpoint
