@@ -5,6 +5,59 @@ real-time financial accuracy, and an enhanced user interface.
 
 ![Sample Comparison](https://via.placeholder.com/800x400?text=Competitor+Analysis+Dashboard+v2.3)
 
+## 🛠️ Major Languages & Frameworks
+
+### **Primary Languages**
+
+- **JavaScript (ES6+)** - Main programming language for both frontend and backend
+- **HTML5** - Modern semantic markup for web interface
+- **CSS3** - Responsive styling and user interface design
+- **Batch Script** - Windows automation and server launching
+
+### **Backend Frameworks & Runtime**
+
+- **Node.js (v16+)** - JavaScript runtime environment
+- **Express.js** - Web application framework (selective utilities)
+- **Native HTTP Module** - Built-in Node.js server for lightweight performance
+
+### **Frontend Technologies**
+
+- **Vanilla JavaScript** - Client-side interactivity and DOM manipulation
+- **Chart.js concepts** - Data visualization for financial comparisons
+- **Responsive CSS** - Mobile-friendly interface design
+
+### **AI & Machine Learning**
+
+- **Google Gemini AI** - Primary AI-powered company analysis
+- **Mistral AI** - Secondary AI integration for business intelligence
+- **REST API Integration** - Seamless AI service communication
+
+### **Data Processing & Web Scraping**
+
+- **Puppeteer** - Headless Chrome automation for dynamic web scraping
+- **Cheerio** - jQuery-like server-side HTML parsing
+- **Axios** - HTTP client for API requests and data fetching
+
+### **Financial Data APIs**
+
+- **yahoo-finance2** - Primary Yahoo Finance API integration
+- **Alpha Vantage API** - Stock market data and company fundamentals
+- **CompaniesMarketCap** - Real-time market capitalization data
+
+### **Development & Testing Tools**
+
+- **Jest** - JavaScript testing framework
+- **Nodemon** - Development server with auto-restart
+- **ESLint** - Code quality and style enforcement
+- **npm** - Package management and dependency resolution
+
+### **Logging & Utilities**
+
+- **Winston** - Structured logging system
+- **Morgan** - HTTP request logging middleware
+- **dotenv** - Environment variable management
+- **node-cache** - In-memory caching system
+
 ## Features
 
 - **📊 Reliable Yahoo Finance Integration**: Primary financial data via the robust `yahoo-finance2` library.
@@ -96,8 +149,19 @@ For optimal performance, configure these API keys:
 - **Gemini AI**: Get free key from [Google AI Studio](https://makersuite.google.com/app/apikey)
 - **Mistral AI**: Get key from [Mistral AI Platform](https://console.mistral.ai/)
 - **Alpha Vantage**: Get free key from [Alpha Vantage](https://www.alphavantage.co/support/#api-key)
+- **Google Custom Search** (for enhanced logo fetching): Get key
+  from [Google Cloud Console](https://console.cloud.google.com/)
 
 **Note**: `yahoo-finance2` and CompaniesMarketCap work without API keys!
+
+### Logo Fetching Strategy (Hybrid Approach):
+
+The system uses a 4-tier logo fetching strategy:
+
+1. **🥇 Clearbit Logo API** - High-quality corporate logos via domain lookup
+2. **🥈 Favicon Scraping** - Extract logos/favicons directly from company websites
+3. **🥉 Google Images API** - Search for official company logos using Custom Search
+4. **🏅 Wikipedia Fallback** - Traditional Wikipedia thumbnail extraction
 
 ### Configuration Options:
 
@@ -116,6 +180,11 @@ api: {
   },
   alphaVantage: {
     key: process.env.ALPHA_VANTAGE_API_KEY || 'YOUR_ALPHA_VANTAGE_KEY_HERE' // Updated placeholder
+  },
+  google: {
+    key: process.env.GOOGLE_API_KEY || 'YOUR_GOOGLE_API_KEY',
+    cx: process.env.GOOGLE_CX || 'YOUR_GOOGLE_CX',
+    enabled: true
   }
 }
 ```
@@ -127,6 +196,8 @@ api: {
 set GEMINI_API_KEY=your_gemini_key_here
 set MISTRAL_API_KEY=your_mistral_key_here
 set ALPHA_VANTAGE_API_KEY=your_alpha_vantage_key_here
+set GOOGLE_API_KEY=your_google_api_key
+set GOOGLE_CX=your_google_cx
 ```
 
 #### Option 3: Batch File (Windows)
@@ -136,6 +207,8 @@ Edit `run-enhanced-server.bat` and set your keys directly (less secure, for loca
 REM set GEMINI_API_KEY=your_gemini_key_here
 REM set MISTRAL_API_KEY=your_mistral_key_here
 REM set ALPHA_VANTAGE_API_KEY=your_alpha_vantage_key_here
+REM set GOOGLE_API_KEY=your_google_api_key
+REM set GOOGLE_CX=your_google_cx
 ```
 
 ## Screenshots
@@ -150,15 +223,112 @@ REM set ALPHA_VANTAGE_API_KEY=your_alpha_vantage_key_here
 
 ## 🏗️ Tech Stack
 
-- **Node.js**: JavaScript runtime environment.
-- **Core HTTP Module**: Native Node.js HTTP server.
-- **`yahoo-finance2`**: Primary source for Yahoo Finance financial data (reliable).
-- **CompaniesMarketCap Scraper**: Real-time market cap/stock prices (redirect-aware).
-- **Gemini AI & Mistral AI**: For AI-enhanced business intelligence.
-- **Alpha Vantage API**: Additional financial data.
-- **Wikipedia API**: Basic company info.
-- **In-memory Database & Caching**: For speed.
-- **HTML/CSS/JavaScript**: For the built-in UI.
+### **Core Technologies**
+
+#### **Backend & Server**
+
+- **Node.js** - JavaScript runtime environment (v16+ recommended)
+- **Native HTTP Module** - Built-in Node.js HTTP server for lightweight, high-performance web serving
+- **JavaScript (ES6+)** - Primary programming language with modern features
+
+#### **Web Scraping & Data Extraction**
+
+- **Puppeteer** - Headless Chrome automation for dynamic web scraping
+- **Cheerio** - jQuery-like server-side HTML parsing and manipulation
+- **Axios** - HTTP client for API requests and web scraping
+
+#### **Financial Data APIs**
+
+- **yahoo-finance2** - Primary Yahoo Finance API integration (reliable financial data)
+- **yahoo-stock-api** - Alternative Yahoo Finance API (backup)
+- **Alpha Vantage API** - Stock market data and company fundamentals
+- **CompaniesMarketCap** - Real-time market capitalization data (web scraping)
+
+#### **AI & Machine Learning Integration**
+
+- **Google Gemini AI** - Primary AI-powered company analysis and data enrichment
+- **Mistral AI** - Secondary AI integration for comprehensive business intelligence
+- **REST APIs** - Integration with AI services for enhanced data gathering
+
+#### **Frontend Technologies**
+
+- **HTML5** - Modern semantic markup (embedded in server responses)
+- **CSS3** - Responsive styling with flexbox and modern CSS features
+- **Vanilla JavaScript** - Client-side interactivity and dynamic content rendering
+- **Chart.js concepts** - Data visualization for financial comparisons
+
+#### **Data Management**
+
+- **In-Memory Database** - Fast caching system for company data
+- **JSON** - Data interchange format for APIs and configuration
+- **File System (fs)** - Local file operations and static asset serving
+
+#### **Development & Build Tools**
+
+- **npm** - Package management and dependency resolution
+- **Jest** - JavaScript testing framework
+- **Nodemon** - Development server with auto-restart
+- **ESLint** - Code quality and style enforcement (development)
+
+#### **Logging & Monitoring**
+
+- **Winston** - Structured logging system
+- **Morgan** - HTTP request logging middleware
+- **Console logging** - Development and debugging output
+
+#### **Security & Utilities**
+
+- **CORS** - Cross-Origin Resource Sharing support
+- **dotenv** - Environment variable management
+- **Express.js utilities** - Body parsing and middleware (selective use)
+
+#### **External Services Integration**
+
+- **Wikipedia API** - Company information and logo extraction
+- **Clearbit Logo API** - High-quality corporate logo fetching
+- **Google Custom Search API** - Enhanced logo discovery
+- **Favicon scraping** - Direct website logo extraction
+
+### **Architecture Pattern**
+
+- **MVC-inspired** - Model-View-Controller separation with services layer
+- **RESTful API** - Clean HTTP endpoints for data access
+- **Microservices approach** - Modular service architecture
+- **Event-driven** - Asynchronous data processing
+- **Fallback hierarchy** - Multi-source data reliability system
+
+### **Key Libraries & Dependencies**
+
+```json
+{
+  "production": {
+    "axios": "HTTP client for API requests",
+    "cheerio": "Server-side HTML parsing",
+    "cors": "Cross-origin resource sharing",
+    "dotenv": "Environment configuration",
+    "express": "Web framework utilities",
+    "mongoose": "MongoDB object modeling",
+    "morgan": "HTTP request logger",
+    "node-cache": "In-memory caching",
+    "puppeteer": "Headless browser automation",
+    "winston": "Logging framework",
+    "yahoo-finance2": "Primary financial data API",
+    "yahoo-stock-api": "Alternative financial API"
+  },
+  "development": {
+    "jest": "Testing framework",
+    "nodemon": "Development server",
+    "supertest": "HTTP testing utilities"
+  }
+}
+```
+
+### **Platform Compatibility**
+
+- **Windows** - Primary development platform with batch scripts
+- **Linux/Unix** - Full compatibility with shell scripts
+- **macOS** - Cross-platform Node.js support
+- **Docker** - Containerization ready (optional)
 
 ## 📊 Data Source Hierarchy
 

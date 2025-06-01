@@ -6,10 +6,13 @@ const url = require('url');
 
 // Load configuration
 const config = require('./config');
+const { fetchCompanyLogo } = require('./utils/logoFetcher');
 
 // Import Primary Yahoo Finance API (yahoo-stock-api by phamleduy04)
 const YahooStockAPI = require('yahoo-stock-api').default; 
 const yahooStockAPI_instance = new YahooStockAPI();
+// Import yahoo-finance2 for robust financial data fetching
+const yahooFinance2 = require('yahoo-finance2').default;
 let popularCompanies = [];
 try {
     const popularCompaniesPath = path.join(__dirname, '..', 'public', 'popular_companies.json');
@@ -171,7 +174,25 @@ const db = {
                 revenue: 394000000000,
                 profitMargin: 0.25,
                 peRatio: null, // Placeholder for new data
-                eps: null      // Placeholder for new data
+                eps: null,      // Placeholder for new data
+                currentRatio: null,
+                debtToEquity: null,
+                grossMargin: null,
+                operatingMargin: null,
+                returnOnAssets: null,
+returnOnEquity: null,
+revenueGrowth: null,
+earningsGrowth: null,
+priceToBook: null,
+enterpriseValue: null,
+volume: null,
+averageVolume: null,
+beta: null,
+freeCashFlow: null,
+operatingCashFlow: null,
+bookValue: null,
+totalCash: null,
+totalDebt: null
             },
             products: [
                 {name: 'iPhone', rating: 4.5},
@@ -199,7 +220,13 @@ const db = {
               revenue: 198000000000,
               profitMargin: 0.36,
               peRatio: null,
-              eps: null
+              eps: null,
+              currentRatio: null,
+              quickRatio: null,
+              debtToEquity: null,
+              grossMargin: null,
+              operatingMargin: null,
+              returnOnAssets: null
           },
           products: [
               {name: 'Windows', rating: 4.0},
@@ -293,6 +320,43 @@ async function searchStockSymbol(keywords) {
     return null;
 }
 
+// Finnhub - Fetch financial ratios
+async function fetchFinancialRatiosFromFinnhub(symbol) {
+  const apiKey = 'd0u2d1pr01qgk5llgb60d0u2d1pr01qgk5llgb6g';
+  const finnhubUrl = `https://finnhub.io/api/v1/stock/metric?symbol=${symbol}&metric=all&token=${apiKey}`;
+  try {
+    const res = await fetch(finnhubUrl);
+    const data = await res.json();
+    if (!data || !data.metric) return null;
+    console.log('Finnhub metrics for', symbol, data.metric); // New: LOG
+    function pick(...args) { for (const k of args) { if (data.metric[k] !== undefined && data.metric[k] !== null) return data.metric[k]; } return null; }
+    return {
+      currentRatio: pick('currentRatioTTM','currentRatioAnnual','currentRatioQuarterly','currentRatio'),
+      quickRatio: pick('quickRatioTTM','quickRatioAnnual','quickRatioQuarterly','quickRatio'),
+      debtToEquity: pick('debtEquityRatioTTM','debtEquityRatioAnnual','debtEquityRatioQuarterly','totalDebtEquityQuarterly'),
+      grossMargin: pick('grossMarginTTM','grossMarginAnnual','grossMarginQuarterly','grossMargin'),
+      operatingMargin: pick('operatingMarginTTM','operatingMarginAnnual','operatingMarginQuarterly','operatingMargin'),
+      returnOnAssets: pick('roaTTM','roaAnnual','roaQuarterly','returnOnAssets'),
+      returnOnEquity: pick('roeTTM','roeAnnual','roeQuarterly','returnOnEquity'),
+      revenueGrowth: pick('revenueGrowthTTM','revenueGrowthAnnual','revenueGrowthQuarterly','revenueGrowth'),
+      earningsGrowth: pick('netIncomeGrowthTTM','netIncomeGrowthAnnual','netIncomeGrowthQuarterly','netIncomeGrowth'),
+      priceToBook: pick('pbAnnual','pbQuarterly','pbTTM','priceToBookRatioAnnual','priceToBookRatioTTM'),
+      enterpriseValue: pick('enterpriseValueQuarterly','enterpriseValueAnnual','enterpriseValueTTM','enterpriseValue'),
+      volume: null,
+      averageVolume: null,
+      beta: pick('beta'),
+      freeCashFlow: pick('freeCashFlowYieldAnnual','freeCashFlowYieldTTM','freeCashFlowYieldQuarterly'),
+      operatingCashFlow: pick('operatingCashFlowPerShareAnnual','operatingCashFlowPerShareTTM','operatingCashFlowPerShareQuarterly'),
+      bookValue: pick('bookValuePerShareAnnual','bookValuePerShareQuarterly','bookValuePerShareTTM'),
+      totalCash: null,
+      totalDebt: null
+    };
+  } catch (e) {
+    console.warn('Finnhub ratio fetch failed:', e);
+    return null;
+  }
+}
+
 // Alpha Vantage - Fetch company overview and financials
 async function fetchCompanyFinancialsFromAlphaVantage(symbol) {
     if (ALPHA_VANTAGE_API_KEY === 'YOUR_API_KEY_HERE') {
@@ -312,15 +376,34 @@ async function fetchCompanyFinancialsFromAlphaVantage(symbol) {
         description: data.Description || '',
         industry: data.Industry || 'Unknown',
         sector: data.Sector || 'Unknown',
-        website: data.Websit || '', // Typo in Alpha Vantage API? Checking common variations.
+        website: data.Website || data.Websit || '', // Typo in Alpha Vantage API? Checking common variations.
         stockSymbol: data.Symbol || symbol,
         marketCap: data.MarketCapitalization ? parseFloat(data.MarketCapitalization) : null,
         peRatio: data.PERatio && data.PERatio !== 'None' ? parseFloat(data.PERatio) : null,
         eps: data.EPS && data.EPS !== 'None' ? parseFloat(data.EPS) : null,
-        revenue: null, // Overview doesn't usually have revenue, might need another call or be in other reports
+        revenue: data.RevenueTTM ? parseFloat(data.RevenueTTM) : null,
         profitMargin: data.ProfitMargin && data.ProfitMargin !== 'None' ? parseFloat(data.ProfitMargin) : null,
+        currentRatio: data.CurrentRatio ? parseFloat(data.CurrentRatio) : null,
+        quickRatio: data.QuickRatio ? parseFloat(data.QuickRatio) : null,
+        debtToEquity: data.DebtEquity ? parseFloat(data.DebtEquity) : null,
+        grossMargin: data.GrossProfitMargin ? parseFloat(data.GrossProfitMargin) : null,
+        operatingMargin: data.OperatingMarginTTM ? parseFloat(data.OperatingMarginTTM) : null,
+        returnOnAssets: data.ReturnOnAssetsTTM ? parseFloat(data.ReturnOnAssetsTTM) : null,
+        returnOnEquity: data.ReturnOnEquityTTM ? parseFloat(data.ReturnOnEquityTTM) : null,
+        revenueGrowth: data.RevenueGrowth ? parseFloat(data.RevenueGrowth) : null,
+        earningsGrowth: data.EarningsGrowth ? parseFloat(data.EarningsGrowth) : null,
+        priceToBook: data.PriceToBookRatio ? parseFloat(data.PriceToBookRatio) : null,
+        enterpriseValue: data.EnterpriseValue ? parseFloat(data.EnterpriseValue) : null,
+        volume: data.Volume ? parseFloat(data.Volume) : null,
+        averageVolume: data.AverageVolume ? parseFloat(data.AverageVolume) : null,
+        beta: data.Beta ? parseFloat(data.Beta) : null,
+        freeCashFlow: data.FreeCashFlowTTM ? parseFloat(data.FreeCashFlowTTM) : null,
+        operatingCashFlow: data.OperatingCashflowTTM ? parseFloat(data.OperatingCashflowTTM) : null,
+        bookValue: data.BookValue ? parseFloat(data.BookValue) : null,
+        totalCash: data.TotalCash ? parseFloat(data.TotalCash) : null,
+        totalDebt: data.TotalDebt ? parseFloat(data.TotalDebt) : null,
         country: data.Country || 'Unknown',
-        headquarters: 'Unknown' // Not directly available in OVERVIEW
+        headquarters: 'Unknown'
     };
 }
 
@@ -679,38 +762,38 @@ async function fetchDataFromGemini(companyName) {
     console.log(`Using Gemini API for ${companyName}. This may take a few seconds...`);
     
     try {
-        const prompt = `Analyze the company "${companyName}" and provide comprehensive business intelligence data in the following JSON format. Use your knowledge to provide accurate estimates and information:
+        const prompt = `Analyze the company "${companyName}" and provide comprehensive business intelligence data. Return ONLY a valid JSON object with this exact structure - no additional text, explanations, or markdown formatting:
 
 {
-  "description": "Comprehensive 2-3 sentence description of the company's business model and operations",
+  "description": "2-3 sentence description of the company's business model",
   "industry": "Primary industry/sector",
   "founded": "YYYY",
   "headquarters": "City, State/Country",
   "website": "Official website URL if known",
   "financials": {
     "stockSymbol": "Stock ticker symbol if publicly traded",
-    "marketCap": number_in_billions,
-    "revenue": number_in_billions_annual,
-    "profitMargin": decimal_percentage,
-    "peRatio": number,
-    "eps": number
+    "marketCap": 0,
+    "revenue": 0,
+    "profitMargin": 0,
+    "peRatio": 0,
+    "eps": 0
   },
-  "strengths": ["List of 3-5 key competitive advantages"],
-  "weaknesses": ["List of 2-3 main challenges or weaknesses"],
-  "competitors": ["List of 3-5 main competitors"],
+  "strengths": ["competitive advantage 1", "competitive advantage 2"],
+  "weaknesses": ["challenge 1", "challenge 2"],
+  "competitors": ["competitor 1", "competitor 2"],
   "customerMetrics": {
-    "userCount": number_in_millions,
-    "userGrowth": decimal_growth_rate,
-    "rating": number_out_of_5
+    "userCount": 0,
+    "userGrowth": 0,
+    "rating": 0
   },
   "products": [
     {"name": "Product name", "category": "Product category"}
   ],
-  "recentNews": "Brief summary of recent significant developments or news",
-  "marketPosition": "Brief description of market position and competitive standing"
+  "recentNews": "Brief summary of recent developments",
+  "marketPosition": "Market position description"
 }
 
-Provide realistic estimates based on publicly available information and industry knowledge. For financial data, use approximate values in billions for market cap and revenue.`;
+For ${companyName}, provide realistic estimates. Use numbers in billions for marketCap/revenue, millions for userCount, decimals for ratios/growth rates. Ensure all property names are double-quoted and all string values are double-quoted. Return only the JSON object.`;
 
         const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
             method: 'POST',
@@ -750,24 +833,80 @@ Provide realistic estimates based on publicly available information and industry
 
         let result;
         try {
-            // Extract JSON from the response (Gemini might include additional text)
-            const jsonMatch = responseText.match(/\{[\s\S]*\}/);
-            if (jsonMatch) {
-                result = JSON.parse(jsonMatch[0]);
-                console.log(`Successfully processed Gemini data for ${companyName}`);
-                
-                // Add source information
-                result._source = 'gemini';
-                result._timestamp = new Date().toISOString();
-                
-                return result;
-            } else {
-                console.warn('No JSON found in Gemini response for', companyName);
+            // Clean the response text to extract valid JSON
+            let cleanedText = responseText.trim();
+            
+            // Remove markdown code blocks if present
+            cleanedText = cleanedText.replace(/```json\s*/g, '').replace(/```\s*$/g, '');
+            
+            // Find the JSON content - look for the outermost braces
+            let jsonStartIndex = cleanedText.indexOf('{');
+            let jsonEndIndex = cleanedText.lastIndexOf('}');
+            
+            if (jsonStartIndex === -1 || jsonEndIndex === -1 || jsonStartIndex >= jsonEndIndex) {
+                console.warn('No valid JSON structure found in Gemini response for', companyName);
                 return null;
             }
+            
+            // Extract the JSON portion
+            const jsonString = cleanedText.substring(jsonStartIndex, jsonEndIndex + 1);
+            
+            // Try to parse the JSON directly first
+            try {
+                result = JSON.parse(jsonString);
+            } catch (firstParseError) {
+                // If that fails, try to clean up common JSON issues
+                let fixedJsonString = jsonString
+                    // Fix unquoted property names
+                    .replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":')
+                    // Fix single quotes to double quotes (but be careful with contractions)
+                    .replace(/:\s*'([^']*)'/g, ': "$1"')
+                    // Fix trailing commas
+                    .replace(/,(\s*[}\]])/g, '$1')
+                    // Fix multiple commas
+                    .replace(/,+/g, ',');
+                
+                result = JSON.parse(fixedJsonString);
+            }
+            
+            console.log(`Successfully processed Gemini data for ${companyName}`);
+            
+            // Add source information
+            result._source = 'gemini';
+            result._timestamp = new Date().toISOString();
+            
+            return result;
+            
         } catch (e) {
-            console.error('Failed to parse Gemini response as JSON:', e);
-            console.log('Raw content:', responseText.substring(0, 500) + '...');
+            console.error('Failed to parse Gemini response as JSON for', companyName, ':', e.message);
+            console.error('Response snippet:', responseText.substring(0, 500) + '...');
+            
+            // Fallback: try to extract at least basic information manually
+            try {
+                const fallbackResult = {
+                    description: null,
+                    industry: null,
+                    financials: {},
+                    _source: 'gemini_fallback',
+                    _timestamp: new Date().toISOString()
+                };
+                
+                // Extract description using regex
+                const descMatch = responseText.match(/"description"\s*:\s*"([^"]+)"/i);
+                if (descMatch) fallbackResult.description = descMatch[1];
+                
+                // Extract industry using regex
+                const industryMatch = responseText.match(/"industry"\s*:\s*"([^"]+)"/i);
+                if (industryMatch) fallbackResult.industry = industryMatch[1];
+                
+                if (fallbackResult.description || fallbackResult.industry) {
+                    console.log(`Extracted partial data for ${companyName} using fallback parsing`);
+                    return fallbackResult;
+                }
+            } catch (fallbackError) {
+                console.error('Fallback parsing also failed:', fallbackError.message);
+            }
+            
             return null;
         }
 
@@ -854,6 +993,38 @@ async function findOrCreateCompany(companyName) {
         console.log(`✗ No stock symbol for "${companyName}", yahoo-finance2 skipped.`);
     }
 
+    // 1.5 Alpha Vantage (fallback for any missing fields)
+    if (hasEmptyFinancialFields(companyData.financials, [
+        'marketCap','revenue','profitMargin','peRatio','eps','currentRatio','quickRatio','debtToEquity','grossMargin','operatingMargin',
+        'returnOnAssets','returnOnEquity','revenueGrowth','earningsGrowth','priceToBook','enterpriseValue','volume','averageVolume',
+        'beta','freeCashFlow','operatingCashFlow','bookValue','totalCash','totalDebt'
+    ])) {
+        const alphaVantageData = await fetchCompanyFinancialsFromAlphaVantage(companyData.financials.stockSymbol || companyData.name);
+        if (alphaVantageData) {
+            console.log(`✓ Data obtained from Alpha Vantage for ${companyData.name}`);
+            Object.keys(alphaVantageData).forEach(key => mergeField(companyData.financials, key, alphaVantageData[key], 'Alpha Vantage'));
+            if(companyData.dataSource === 'fallback' && Object.values(alphaVantageData).some(v => v !== null)) companyData.dataSource = 'Alpha Vantage';
+        } else {
+            console.log(`✗ Alpha Vantage fetch failed for ${companyData.name}.`);
+        }
+    }
+
+    // 1.6 Finnhub (fallback for financial ratios)
+    if (hasEmptyFinancialFields(companyData.financials, [
+        'marketCap','revenue','profitMargin','peRatio','eps','currentRatio','quickRatio','debtToEquity','grossMargin','operatingMargin',
+        'returnOnAssets','returnOnEquity','revenueGrowth','earningsGrowth','priceToBook','enterpriseValue','volume','averageVolume',
+        'beta','freeCashFlow','operatingCashFlow','bookValue','totalCash','totalDebt'
+    ])) {
+        const finnhubData = await fetchFinancialRatiosFromFinnhub(companyData.financials.stockSymbol || companyData.name);
+        if (finnhubData) {
+            console.log(`✓ Data obtained from Finnhub for ${companyData.name}`);
+            Object.keys(finnhubData).forEach(key => mergeField(companyData.financials, key, finnhubData[key], 'Finnhub'));
+            if(companyData.dataSource === 'fallback' && Object.values(finnhubData).some(v => v !== null)) companyData.dataSource = 'Finnhub';
+        } else {
+            console.log(`✗ Finnhub fetch failed for ${companyData.name}.`);
+        }
+    }
+
     // 2. CompaniesMarketCap
     if (hasEmptyFinancialFields(companyData.financials, ['marketCap', 'stockPrice'])) {
         const marketCapRawData = await scrapeCompanyFromMarketCap(companyData.name);
@@ -891,17 +1062,38 @@ async function findOrCreateCompany(companyName) {
             if (geminiData.products) mergeField(companyData, 'products', geminiData.products, 'Gemini AI');
 
             if (geminiData.financials) {
-                const convertB = (v) => v !== null && v !== undefined ? v * 1e9 : null;
                 Object.keys(geminiData.financials).forEach(key => {
-                    const val = (key === 'marketCap' || key === 'revenue') ? convertB(geminiData.financials[key]) : geminiData.financials[key];
+                    let val = geminiData.financials[key];
+                    
+                    // Only convert billions to actual values for financial fields that need it
+                    if (['marketCap','revenue','enterpriseValue','freeCashFlow','operatingCashFlow','totalCash','totalDebt'].includes(key)) {
+                        // Check if the value is already in the right range (billions)
+                        // Gemini returns values like 200 for $200B, we need 200000000000
+                        if (val !== null && val !== undefined && val < 10000) { // If less than 10K, likely in billions
+                            val = val * 1e9;
+                        }
+                        // If val is already large (> 10K), it's probably already in actual dollars, so don't convert
+                    }
+                    
                     mergeField(companyData.financials, key, val, 'Gemini AI (Estimate)');
                 });
             }
             if (geminiData.customerMetrics) {
-                const convertM = (v) => v !== null && v !== undefined ? v * 1e6 : null;
-                mergeField(companyData.customerMetrics, 'userCount', convertM(geminiData.customerMetrics.userCount), 'Gemini AI (Estimate)');
-                mergeField(companyData.customerMetrics, 'userGrowth', geminiData.customerMetrics.userGrowth, 'Gemini AI (Estimate)');
-                mergeField(companyData.customerMetrics, 'rating', geminiData.customerMetrics.rating, 'Gemini AI (Estimate)');
+                Object.keys(geminiData.customerMetrics).forEach(key => {
+                    let val = geminiData.customerMetrics[key];
+                    
+                    // Only convert millions to actual values for userCount
+                    if (key === 'userCount') {
+                        // Check if the value is already in the right range
+                        // Gemini returns values like 1000 for 1000M users, we need 1000000000
+                        if (val !== null && val !== undefined && val < 100000) { // If less than 100K, likely in millions
+                            val = val * 1e6;
+                        }
+                        // If val is already large (> 100K), it's probably already in actual count, so don't convert
+                    }
+                    
+                    mergeField(companyData.customerMetrics, key, val, 'Gemini AI (Estimate)');
+                });
             }
             if(companyData.dataSource === 'fallback') companyData.dataSource = 'Gemini AI';
         } else {
@@ -924,18 +1116,39 @@ async function findOrCreateCompany(companyName) {
             mergeField(companyData, 'competitors', mistralData.competitors, 'Mistral AI');
 
             if (mistralData.financials) {
-                const convertB = (v) => v !== null && v !== undefined ? v * 1e9 : null;
-                 Object.keys(mistralData.financials).forEach(key => {
-                    const val = (key === 'marketCap' || key === 'revenue') ? convertB(mistralData.financials[key]) : mistralData.financials[key];
+                Object.keys(mistralData.financials).forEach(key => {
+                    let val = mistralData.financials[key];
+                    
+                    // Only convert billions to actual values for financial fields that need it
+                    if (['marketCap','revenue','enterpriseValue','freeCashFlow','operatingCashFlow','totalCash','totalDebt'].includes(key)) {
+                        // Check if the value is already in the right range (billions)
+                        // Mistral returns values like 200 for $200B, we need 200000000000
+                        if (val !== null && val !== undefined && val < 10000) { // If less than 10K, likely in billions
+                            val = val * 1e9;
+                        }
+                        // If val is already large (> 10K), it's probably already in actual dollars, so don't convert
+                    }
+                    
                     mergeField(companyData.financials, key, val, 'Mistral AI (Estimate)');
                 });
             }
              if (mistralData.customerMetrics) {
-                const convertM = (v) => v !== null && v !== undefined ? v * 1e6 : null;
-                mergeField(companyData.customerMetrics, 'userCount', convertM(mistralData.customerMetrics.userCount), 'Mistral AI (Estimate)');
-                mergeField(companyData.customerMetrics, 'userGrowth', mistralData.customerMetrics.userGrowth, 'Mistral AI (Estimate)');
-                mergeField(companyData.customerMetrics, 'rating', mistralData.customerMetrics.rating, 'Mistral AI (Estimate)');
-            }
+                Object.keys(mistralData.customerMetrics).forEach(key => {
+                    let val = mistralData.customerMetrics[key];
+                    
+                    // Only convert millions to actual values for userCount
+                    if (key === 'userCount') {
+                        // Check if the value is already in the right range
+                        // Mistral returns values like 1000 for 1000M users, we need 1000000000
+                        if (val !== null && val !== undefined && val < 100000) { // If less than 100K, likely in millions
+                            val = val * 1e6;
+                        }
+                        // If val is already large (> 100K), it's probably already in actual count, so don't convert
+                    }
+                    
+                    mergeField(companyData.customerMetrics, key, val, 'Mistral AI (Estimate)');
+                });
+             }
             if(companyData.dataSource === 'fallback') companyData.dataSource = 'Mistral AI';
         } else {
             console.log(`✗ Mistral AI fetch failed for ${companyData.name}.`);
@@ -944,7 +1157,15 @@ async function findOrCreateCompany(companyName) {
 
     // --- Placeholder for Wikipedia (To be inserted next) ---
 
-    // 5. Wikipedia (Description, Logo - only if still missing)
+    // 5. Logo fetching (try Clearbit, favicon, Google Search before Wikipedia)
+    if (!companyData.logo) {
+        const logoResult = await fetchCompanyLogo(companyData.name, companyData.website);
+        if (logoResult && logoResult.logo) {
+            mergeField(companyData, 'logo', logoResult.logo, logoResult.logoSource);
+        }
+    }
+
+    // 6. Wikipedia (Description, Logo - only if still missing)
     if (!companyData.description || !companyData.logo) {
         const nameForWikipedia = companyData.name;
         const wikiData = await scrapeCompanyFromWikipedia(nameForWikipedia);
@@ -1022,7 +1243,13 @@ async function fetchStockDataYahoo(symbol) {
             revenue: null,
             profitMargin: null,
             peRatio: null,
-            eps: null
+            eps: null,
+            currentRatio: null,
+            quickRatio: null,
+            debtToEquity: null,
+            grossMargin: null,
+            operatingMargin: null,
+            returnOnAssets: null
         };
 
         // Get basic quote data
@@ -1040,7 +1267,7 @@ async function fetchStockDataYahoo(symbol) {
 
         // Get additional financial data using quoteSummary
         try {
-            const summary = await yahooFinance.quoteSummary(symbol, {
+            const summary = await yahooFinance2.quoteSummary(symbol, {
                 modules: ['financialData', 'defaultKeyStatistics', 'summaryDetail', 'incomeStatementHistory', 'earnings']
             });
             
@@ -1052,6 +1279,24 @@ async function fetchStockDataYahoo(symbol) {
                     }
                     if (!stockData.profitMargin && summary.financialData.profitMargins) {
                         stockData.profitMargin = summary.financialData.profitMargins.raw;
+                    }
+                    if (!stockData.returnOnAssets && summary.financialData.returnOnAssets) {
+                        stockData.returnOnAssets = summary.financialData.returnOnAssets.raw;
+                    }
+                    if (!stockData.currentRatio && summary.financialData.currentRatio) {
+                        stockData.currentRatio = summary.financialData.currentRatio.raw;
+                    }
+                    if (!stockData.quickRatio && summary.financialData.quickRatio) {
+                        stockData.quickRatio = summary.financialData.quickRatio.raw;
+                    }
+                    if (!stockData.debtToEquity && summary.financialData.debtToEquity) {
+                        stockData.debtToEquity = summary.financialData.debtToEquity.raw;
+                    }
+                    if (!stockData.grossMargin && summary.financialData.grossMargins) {
+                        stockData.grossMargin = summary.financialData.grossMargins.raw;
+                    }
+                    if (!stockData.operatingMargin && summary.financialData.operatingMargins) {
+                        stockData.operatingMargin = summary.financialData.operatingMargins.raw;
                     }
                 }
                 
@@ -1093,7 +1338,7 @@ async function fetchStockDataYahoo(symbol) {
         // If we still don't have revenue, try a different approach
         if (!stockData.revenue) {
             try {
-                const fundamentals = await yahooFinance.quoteSummary(symbol, {
+                const fundamentals = await yahooFinance2.quoteSummary(symbol, {
                     modules: ['incomeStatementHistoryQuarterly', 'financialData']
                 });
                 
@@ -1118,6 +1363,18 @@ async function fetchStockDataYahoo(symbol) {
                     // Final fallback: try financialData again
                     if (!stockData.revenue && fundamentals.financialData && fundamentals.financialData.totalRevenue) {
                         stockData.revenue = fundamentals.financialData.totalRevenue.raw;
+                    }
+                    if (summary.defaultKeyStatistics && summary.defaultKeyStatistics.bookValue) {
+                        stockData.bookValue = summary.defaultKeyStatistics.bookValue.raw ?? stockData.bookValue;
+                    }
+                    if (quote && quote.bookValue) {
+                        stockData.bookValue = quote.bookValue ?? stockData.bookValue;
+                    }
+                    if (summary.financialData && summary.financialData.totalCash) {
+                        stockData.totalCash = summary.financialData.totalCash.raw ?? stockData.totalCash;
+                    }
+                    if (summary.financialData && summary.financialData.totalDebt) {
+                        stockData.totalDebt = summary.financialData.totalDebt.raw ?? stockData.totalDebt;
                     }
                 }
             } catch (fundamentalsError) {
@@ -1156,6 +1413,25 @@ function generateComparison(company1, company2) {
         profitMargin: compareMetric(financials1.profitMargin, financials2.profitMargin, company1.id, company2.id, 'profitMargin'),
         peRatio: compareMetric(financials1.peRatio, financials2.peRatio, company1.id, company2.id, 'peRatio'),
         eps: compareMetric(financials1.eps, financials2.eps, company1.id, company2.id, 'eps'),
+        currentRatio: compareMetric(financials1.currentRatio, financials2.currentRatio, company1.id, company2.id, 'currentRatio'),
+        quickRatio: compareMetric(financials1.quickRatio, financials2.quickRatio, company1.id, company2.id, 'quickRatio'),
+        debtToEquity: compareMetric(financials1.debtToEquity, financials2.debtToEquity, company1.id, company2.id, 'debtToEquity'),
+        grossMargin: compareMetric(financials1.grossMargin, financials2.grossMargin, company1.id, company2.id, 'grossMargin'),
+        operatingMargin: compareMetric(financials1.operatingMargin, financials2.operatingMargin, company1.id, company2.id, 'operatingMargin'),
+        returnOnAssets: compareMetric(financials1.returnOnAssets, financials2.returnOnAssets, company1.id, company2.id, 'returnOnAssets'),
+        returnOnEquity: compareMetric(financials1.returnOnEquity, financials2.returnOnEquity, company1.id, company2.id, 'returnOnEquity'),
+        revenueGrowth: compareMetric(financials1.revenueGrowth, financials2.revenueGrowth, company1.id, company2.id, 'revenueGrowth'),
+        earningsGrowth: compareMetric(financials1.earningsGrowth, financials2.earningsGrowth, company1.id, company2.id, 'earningsGrowth'),
+        priceToBook: compareMetric(financials1.priceToBook, financials2.priceToBook, company1.id, company2.id, 'priceToBook'),
+        enterpriseValue: compareMetric(financials1.enterpriseValue, financials2.enterpriseValue, company1.id, company2.id, 'enterpriseValue'),
+        volume: compareMetric(financials1.volume, financials2.volume, company1.id, company2.id, 'volume'),
+        averageVolume: compareMetric(financials1.averageVolume, financials2.averageVolume, company1.id, company2.id, 'averageVolume'),
+        beta: compareMetric(financials1.beta, financials2.beta, company1.id, company2.id, 'beta'),
+        freeCashFlow: compareMetric(financials1.freeCashFlow, financials2.freeCashFlow, company1.id, company2.id, 'freeCashFlow'),
+        operatingCashFlow: compareMetric(financials1.operatingCashFlow, financials2.operatingCashFlow, company1.id, company2.id, 'operatingCashFlow'),
+        bookValue: compareMetric(financials1.bookValue, financials2.bookValue, company1.id, company2.id, 'bookValue'),
+        totalCash: compareMetric(financials1.totalCash, financials2.totalCash, company1.id, company2.id, 'totalCash'),
+        totalDebt: compareMetric(financials1.totalDebt, financials2.totalDebt, company1.id, company2.id, 'totalDebt'),
     };
 
     const userMetricsComparison = {
@@ -1317,6 +1593,12 @@ function formatNumber(num) {
     return num.toFixed(2);
 }
 
+function showNumber(val, digits = 2) {
+  if (typeof val === 'number') return val.toFixed(digits);
+  if (val && typeof val.raw === 'number') return val.raw.toFixed(digits);
+  return 'N/A';
+}
+
 function renderCompanyBox(company, companyKey) {
     if (!company) return `<div class="company-box not-found">Company data for <strong>${companyKey}</strong> not found or failed to load.</div>`;
     const financials = company.financials || {};
@@ -1342,11 +1624,45 @@ function renderCompanyBox(company, companyKey) {
         </div>
         
         <div class="financial-data">
-          <p><strong>Market Cap:</strong> ${formatNumber(financials.marketCap)}</p>
-          <p><strong>P/E Ratio:</strong> ${financials.peRatio !== null ? financials.peRatio.toFixed(2) : 'N/A'}</p>
-          <p><strong>EPS:</strong> ${financials.eps !== null ? financials.eps.toFixed(2) : 'N/A'}</p>
-          <p><strong>Revenue (TTM):</strong> ${formatNumber(financials.revenue)}</p>
-          <p><strong>Profit Margin:</strong> ${financials.profitMargin !== null ? (financials.profitMargin * 100).toFixed(2) + '%' : 'N/A'}</p>
+          ${(() => {
+            const financialMetricConfig = [
+              { key: 'marketCap', label: 'Market Cap' },
+              { key: 'peRatio', label: 'P/E Ratio' },
+              { key: 'eps', label: 'EPS' },
+              { key: 'revenue', label: 'Revenue (TTM)' },
+              { key: 'profitMargin', label: 'Profit Margin', percent: true },
+              { key: 'currentRatio', label: 'Current Ratio' },
+              { key: 'quickRatio', label: 'Quick Ratio' },
+              { key: 'debtToEquity', label: 'Debt to Equity' },
+              { key: 'grossMargin', label: 'Gross Margin', percent: true },
+              { key: 'operatingMargin', label: 'Operating Margin', percent: true },
+              { key: 'returnOnAssets', label: 'Return on Assets (ROA)', percent: true },
+              { key: 'returnOnEquity', label: 'Return on Equity (ROE)', percent: true },
+              { key: 'revenueGrowth', label: 'Revenue Growth', percent: true },
+              { key: 'earningsGrowth', label: 'Earnings Growth', percent: true },
+              { key: 'priceToBook', label: 'Price to Book' },
+              { key: 'enterpriseValue', label: 'Enterprise Value' },
+              { key: 'volume', label: 'Volume' },
+              { key: 'averageVolume', label: 'Average Volume' },
+              { key: 'beta', label: 'Beta' },
+              { key: 'freeCashFlow', label: 'Free Cash Flow' },
+              { key: 'operatingCashFlow', label: 'Operating Cash Flow' },
+              { key: 'bookValue', label: 'Book Value' },
+              { key: 'totalCash', label: 'Total Cash' },
+              { key: 'totalDebt', label: 'Total Debt' }
+            ];
+            
+            return financialMetricConfig.map(cfg => {
+              let val = financials[cfg.key];
+              if (val === undefined || val === null || val === 'N/A' || (typeof val === 'number' && isNaN(val))) return '';
+              if (val && typeof val.raw === 'number') val = val.raw;
+              let display = val;
+              if (cfg.percent && typeof display === 'number') display = (display * 100).toFixed(2) + '%';
+              else if (!cfg.percent && typeof display === 'number') display = display.toFixed(2);
+              else if (cfg.key === 'marketCap' || cfg.key === 'revenue' || cfg.key === 'enterpriseValue' || cfg.key === 'freeCashFlow' || cfg.key === 'operatingCashFlow' || cfg.key === 'totalCash' || cfg.key === 'totalDebt') display = formatNumber(val);
+              return `<p><strong>${cfg.label}:</strong> ${display}</p>`;
+            }).join('');
+          })()}
         </div>
         <p><span class="toggle-more" onclick="toggleMoreInfo('${company.id || name.replace(/\W/g, '')}')">▼ See More Details</span></p>
         <div id="more-${company.id || name.replace(/\W/g, '')}" class="more-info">
@@ -1473,7 +1789,6 @@ function renderCompanyBox(company, companyKey) {
                   }
                 </script>
                 <h1>Competitor Analysis Dashboard</h1>
-                <div class="company-count">📊 Database: ${popularCompanies.length} Top Companies Available for Analysis</div>
                 <form method="get" action="/">
                   <h3>Enter Companies to Analyze</h3>
                   <div class="autocomplete-help">💡 Start typing a company name to see alphabetically sorted suggestions from top ${popularCompanies.length} companies</div>
@@ -1505,8 +1820,8 @@ function renderCompanyBox(company, companyKey) {
                     ${company1Data ? renderCompanyBox(company1Data, company1Name) : (company1Name ? renderCompanyBox(null, company1Name) : '')}
                     ${company2Data ? renderCompanyBox(company2Data, company2Name) : (company2Name ? renderCompanyBox(null, company2Name) : '')}
                   </div>
-                  ${(company1Data && company2Data) ? `<div class="form-center compare-button">
-                    <button type="button" onclick="compareCompanies('${company1Data.name}', '${company2Data.name}')">Compare These Two Companies</button>
+                  ${(company1Data && company2Data) ? `<div class="compare-button" style="text-align: center;">
+                    <button type="button" onclick="compareCompanies('${company1Data.name.replace(/'/g, "\\'")}', '${company2Data.name.replace(/'/g, "\\'")}')">Compare These Two Companies</button>
                   </div>
                   <div id="comparison-results">
                     <h2 class="comparison-title">Comparison: <span id="company-1-name"></span> vs <span id="company-2-name"></span></h2>
